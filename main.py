@@ -4,6 +4,8 @@ from PIL import Image
 import os
 from pathlib import Path
 import sys
+from utils.text_reader import DicomTextReader
+import csv
 
 def dicom_to_png(dicom_path, output_path=None, window_center=None, window_width=None):
     """
@@ -85,13 +87,73 @@ def batch_convert_dicom_to_png(input_directory, output_directory=None):
 # Example usage
 if __name__ == "__main__":
     # Convert a single DICOM file
-    if len(sys.argv) > 1:
-        dicom_to_png(sys.argv[1], sys.argv[2])
+    if (sys.argv[1] == "-s"):
+      if len(sys.argv) > 2:
+        dicom_to_png(sys.argv[2], sys.argv[3])
+        
+        text_reader = DicomTextReader(sys.argv[2])
+        patient_info = text_reader.get_patient_info()
+        study_info = text_reader.get_study_info()
+        # laterality, view = mammogram_checker.read_text_from_image(sys.argv[3])
+
+        # Create a CSV file with the patient and study information
+        csv_file_path = "output/patient_study_info.csv" # Specify your desired output path
+
+        with open(csv_file_path, mode='w', newline='') as csv_file:
+          fieldnames = ['patient_id', 'exam_id', 'laterality', 'view', 'file_path', 'years_to_cancer', 'years_to_last_followup', 'split_group']  # Adjust fieldnames as needed
+          writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+
+          writer.writeheader()
+          writer.writerow({
+              'patient_id': patient_info.get('PatientID', 'N/A'),
+              'exam_id': 0,
+              'laterality': study_info.get('Laterality', 'N/A'),
+              'view': study_info.get('ViewPosition', 'N/A'),
+              'file_path': sys.argv[3],
+              'years_to_cancer': 0,
+              'years_to_last_followup': 10,
+              'split_group': 'test'
+          })
+      else:
+          dicom_to_png("data/L1.dcm", "output.png")
     else:
-        dicom_to_png("data/L1.dcm", "output.png")
-    
-    # Convert all DICOM files in a directory
-    if len(sys.argv) > 1:
-        batch_convert_dicom_to_png(sys.argv[1], sys.argv[2])
-    else:
-        batch_convert_dicom_to_png("data", "output")
+        # Convert all DICOM files in a directory
+        if len(sys.argv) > 1:
+            converted_files = batch_convert_dicom_to_png(sys.argv[1], sys.argv[2])
+            
+            # Create a CSV file with the patient and study information
+            csv_file_path = "patients_study_info.csv"  # Specify your desired output path
+            with open(csv_file_path, mode='w', newline='') as csv_file:
+                fieldnames = ['patient_id', 'exam_id', 'laterality', 'view', 'file_path', 'years_to_cancer', 'years_to_last_followup', 'split_group']  # Adjust fieldnames as needed
+                writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+                
+                writer.writeheader()  
+                for file in converted_files:
+                    # Read patient info from the original DICOM file
+                    dicom_file = file.replace('.png', '.dcm') 
+                    modified_path = dicom_file.replace(sys.argv[2], sys.argv[1])# Assuming the original DICOM file has the same name
+                    
+                    try:
+                      print(modified_path)
+                      text_reader = DicomTextReader(modified_path)
+                      patient_info = text_reader.get_patient_info()
+                      study_info = text_reader.get_study_info()
+                      
+                      laterality = study_info.get('Laterality', 'N/A')
+                      view = study_info.get('ViewPosition', 'N/A')
+                      
+                      writer.writerow({
+                          'patient_id': patient_info.get('PatientID', 'N/A'),
+                          'exam_id': 0,
+                          'laterality': laterality,
+                          'view': view,
+                          'file_path': file,
+                          'years_to_cancer': 0,
+                          'years_to_last_followup': 10,
+                          'split_group': 'test'
+                      })
+                    except Exception as e:
+                      print(f"Failed to process {file}: {str(e)}")
+                
+        else:
+            batch_convert_dicom_to_png("data", "output")

@@ -1,5 +1,9 @@
 .venv
 
-/data/*
+/data
 
-/output/*
+/output
+
+/output_patients
+
+patients_study_info.csv
