@@ -2,7 +2,8 @@ import argparse
 import csv
 import logging
 import os
-from typing import List
+from logging.handlers import RotatingFileHandler
+from typing import List, Optional
 
 import numpy as np
 import pydicom
@@ -10,14 +11,26 @@ from PIL import Image
 
 from utils.text_reader import DicomTextReader
 
-logging.basicConfig(level=logging.INFO)
+# Configure logging with RotatingFileHandler
+log_handler = RotatingFileHandler(
+    "dicom_to_png.log",
+    maxBytes=10 * 1024 * 1024,  # 10 MB
+    backupCount=5,  # Keep up to 5 backup files
+)
+log_handler.setLevel(logging.INFO)
+formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+log_handler.setFormatter(formatter)
+
+# Add handler to the root logger
+logging.getLogger().addHandler(log_handler)
+logging.getLogger().setLevel(logging.INFO)
 
 
 def dicom_to_png(
     dicom_path: str,
-    output_path: str = None,
-    window_center: int = None,
-    window_width: int = None,
+    output_path: Optional[str] = None,
+    window_center: Optional[int] = None,
+    window_width: Optional[int] = None,
 ) -> str:
     """
     Convert a DICOM image to PNG format with optional windowing parameters.
@@ -43,7 +56,7 @@ def dicom_to_png(
         try:
             image = dicom.pixel_array.astype(np.float64)
         except AttributeError:
-            raise Exception("DICOM file does not contain pixel data")
+            raise AttributeError("DICOM file does not contain pixel data")
 
         # Apply windowing if parameters are provided
         if window_center is not None and window_width is not None:
@@ -84,15 +97,20 @@ def dicom_to_png(
         return output_path
 
     except FileNotFoundError:
-        raise Exception(f"DICOM file not found: {dicom_path}")
+        logging.error(f"DICOM file not found: {dicom_path}")
+        raise FileNotFoundError(f"DICOM file not found: {dicom_path}")
     except pydicom.errors.InvalidDicomError:
-        raise Exception(f"Invalid DICOM file: {dicom_path}")
+        logging.error(f"Invalid DICOM file: {dicom_path}")
+        raise pydicom.errors.InvalidDicomError(
+            f"Invalid DICOM file: {dicom_path}"
+        )
     except Exception as e:
+        logging.error(f"Error converting DICOM to PNG: {str(e)}")
         raise Exception(f"Error converting DICOM to PNG: {str(e)}")
 
 
 def batch_convert_dicom_to_png(
-    input_directory: str, output_directory: str = None
+    input_directory: str, output_directory: Optional[str] = None
 ) -> List[str]:
     """
     Convert all DICOM files in a directory to PNG format.
@@ -141,7 +159,7 @@ def write_to_csv(
     png_files: List[str],
     dicom_path: str,
     files: bool = False,
-    save_path: str = None,
+    save_path: Optional[str] = None,
 ) -> None:
     """
     Write patient and study information to a CSV file.
@@ -217,13 +235,16 @@ def write_to_csv(
     logging.info(f"CSV file saved: {csv_file_path}")
 
 
-def main():
-    """Main function to handle command-line arguments and execute the script."""
+import argparse
+import logging
+import os
+
+
+def parse_arguments():
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
         description="Convert DICOM files to PNG and optionally write metadata to CSV."
     )
-
-    # Create mutually exclusive group for file and directory
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
         "-d", "--directory", type=str, help="Directory containing DICOM files."
@@ -235,7 +256,6 @@ def main():
         type=str,
         help="Path(s) to one or more DICOM files.",
     )
-
     parser.add_argument(
         "-o",
         "--output",
@@ -247,56 +267,61 @@ def main():
         action="store_true",
         help="Flag to write metadata to a CSV file.",
     )
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+def handle_directory_conversion(directory, output, csv_flag):
+    """Handle conversion of DICOM files in a directory."""
+    if os.path.isdir(directory):
+        converted_files = batch_convert_dicom_to_png(directory, output)
+        if csv_flag:
+            write_to_csv(converted_files, directory, False, output)
+        logging.info(f"Converted all files in directory {directory}")
+    else:
+        logging.error("Invalid directory path")
+        print("Invalid directory path")
+
+
+def handle_file_conversion(files, output, csv_flag):
+    """Handle conversion of individual DICOM files."""
+    all_converted_files = []
+    invalid_files = []
+    for file_path in files:
+        if os.path.isfile(file_path):
+            try:
+                converted_file = dicom_to_png(
+                    file_path, f"{output}/png" if output else None
+                )
+                all_converted_files.append(converted_file)
+                logging.info(f"Converted {file_path} to PNG")
+            except Exception as e:
+                logging.error(f"Error converting file {file_path}: {e}")
+                print(f"Error converting file {file_path}: {e}")
+        else:
+            invalid_files.append(file_path)
+
+    if csv_flag and all_converted_files:
+        write_to_csv(
+            all_converted_files, os.path.dirname(files[0]), True, output
+        )
+        logging.info("CSV file created with metadata of converted files")
+
+    if invalid_files:
+        logging.warning(f"Invalid file paths: {', '.join(invalid_files)}")
+        print(f"Invalid file paths: {', '.join(invalid_files)}")
+
+
+def main():
+    """Main function to handle command-line arguments and execute the script."""
+    parser = argparse.ArgumentParser(
+        description="Convert DICOM files to PNG and optionally write metadata to CSV."
+    )
+    args = parse_arguments()
 
     if args.directory:
-        if os.path.isdir(args.directory):
-            converted_files = batch_convert_dicom_to_png(
-                args.directory, args.output
-            )
-            if args.csv:
-                if args.output:
-                    write_to_csv(
-                        converted_files, args.directory, False, args.output
-                    )
-                else:
-                    write_to_csv(converted_files, args.directory)
-        else:
-            print("Invalid directory path")
+        handle_directory_conversion(args.directory, args.output, args.csv)
     elif args.file:
-        all_converted_files = []
-        invalid_files = []
-        for file_path in args.file:
-            if os.path.isfile(file_path):
-                try:
-                    if args.output:
-                        converted_file = dicom_to_png(
-                            file_path, f"{args.output}/png"
-                        )
-                    else:
-                        converted_file = dicom_to_png(file_path)
-                    all_converted_files.append(converted_file)
-                except Exception as e:
-                    print(f"Error converting file {file_path}: {e}")
-            else:
-                invalid_files.append(file_path)
-
-        if args.csv and all_converted_files:
-            if args.output:
-                write_to_csv(
-                    all_converted_files,
-                    os.path.dirname(args.file[0]),
-                    True,
-                    args.output,
-                )
-            else:
-                write_to_csv(
-                    all_converted_files, os.path.dirname(args.file[0]), True
-                )
-
-        if invalid_files:
-            print(f"Invalid file paths: {', '.join(invalid_files)}")
-
+        handle_file_conversion(args.file, args.output, args.csv)
     else:
         print(
             "Usage: python main.py [-d <dicom_file_dir>] [-f <dicom_file_path> ...] -o <output_file_dir> [--csv]"
