@@ -14,7 +14,7 @@ from utils.text_reader import DicomTextReader
 # Configure logging with RotatingFileHandler
 log_handler = RotatingFileHandler(
     "dicom_to_png.log",
-    maxBytes=10 * 1024 * 1024,  # 10 MB
+    maxBytes=5 * 1024 * 1024,  # 5 MB
     backupCount=5,  # Keep up to 5 backup files
 )
 log_handler.setLevel(logging.INFO)
