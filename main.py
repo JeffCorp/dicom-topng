@@ -79,7 +79,7 @@ def dicom_to_png(
             )
 
         # Save as PNG
-        # pil_image.save(output_path, "PNG")
+        pil_image.save(output_path, "PNG")
         logging.info(f"Saved PNG file: {output_path}")
         return output_path
 
@@ -109,7 +109,7 @@ def batch_convert_dicom_to_png(
     """
     if output_directory is None:
         folder = os.path.basename(input_directory)
-        output_directory = os.path.join("output/png", folder)
+        output_directory = os.path.join("output", folder)
 
     os.makedirs(f"{output_directory}/png", exist_ok=True)
     converted_files = []
