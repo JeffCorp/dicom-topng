@@ -177,6 +177,10 @@ def write_to_csv(
         logging.warning("No PNG files found for writing to CSV")
         return
 
+    if dicom_path.endswith("/") or dicom_path.endswith("\\"):
+        dicom_path = dicom_path.removesuffix("/")
+        dicom_path = dicom_path.removesuffix("\\")
+
     if files:
         if save_path:
             csv_file_path = f"{save_path}/patient_info.csv"
