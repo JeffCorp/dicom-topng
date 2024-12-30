@@ -239,11 +239,6 @@ def write_to_csv(
     logging.info(f"CSV file saved: {csv_file_path}")
 
 
-import argparse
-import logging
-import os
-
-
 def parse_arguments():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
