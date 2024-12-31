@@ -38,14 +38,17 @@ def dicom_to_png(
     Parameters:
         dicom_path (str): Path to the input DICOM file or directory
         output_path (str): Path for the output PNG file (optional)
-        window_center (int): Center of the window for contrast adjustment (optional)
-        window_width (int): Width of the window for contrast adjustment (optional)
+        window_center (int): Center of the window for contrast adjustment \
+            (optional)
+        window_width (int): Width of the window for contrast adjustment \
+            (optional)
 
     Returns:
         str: Path to the saved PNG file
 
     Example:
-        dicom_to_png('path/to/dicom/file.dcm', 'path/to/output/image.png', 50, 350)
+        dicom_to_png('path/to/dicom/file.dcm', 'path/to/output/image.png', 50\
+            , 350)
     """
     file_name = os.path.basename(dicom_path)
     try:
@@ -111,7 +114,7 @@ def dicom_to_png(
 
 def batch_convert_dicom_to_png(
     input_directory: str, output_directory: Optional[str] = None
-) -> List[str]:
+) -> tuple[List[str], List[str]]:
     """
     Convert all DICOM files in a directory to PNG format.
 
@@ -120,10 +123,11 @@ def batch_convert_dicom_to_png(
         output_directory (str): Directory for output PNG files (optional)
 
     Returns:
-        list: List of paths to converted PNG files
+        tuple: List of paths to the converted PNG files and DICOM files
 
     Example:
-        batch_convert_dicom_to_png('path/to/dicom/directory', 'path/to/output/directory')
+        batch_convert_dicom_to_png('path/to/dicom/directory', \
+            'path/to/output/directory')
     """
     if output_directory is None:
         folder = os.path.basename(input_directory)
@@ -131,6 +135,7 @@ def batch_convert_dicom_to_png(
 
     os.makedirs(f"{output_directory}/png", exist_ok=True)
     converted_files = []
+    dicom_files = []
 
     logging.info(
         f"Starting conversion for files in directory: {input_directory}"
@@ -144,6 +149,7 @@ def batch_convert_dicom_to_png(
             )
             try:
                 converted_files.append(dicom_to_png(input_path, output_path))
+                dicom_files.append(input_path)
                 logging.info(f"Successfully converted: {file}")
             except Exception as e:
                 logging.error(f"Failed to convert {file}: {str(e)}")
@@ -152,7 +158,7 @@ def batch_convert_dicom_to_png(
         f"Conversion completed. Converted files: {len(converted_files)}"
     )
 
-    return converted_files
+    return (converted_files, dicom_files)
 
 
 def write_to_csv(
@@ -167,11 +173,13 @@ def write_to_csv(
     Parameters:
         png_files (List[str]): List of paths to the converted PNG files
         dicom_path (str): Path to the DICOM file or directory
-        files (bool): Flag to specify if the input was a list of files (optional)
+        files (bool): Flag to specify if the input was a list of files \
+            (optional)
         save_path (str): Path to save the CSV file (optional)
 
     Example:
-        write_to_csv(['path/to/image1.png', 'path/to/image2.png'], 'path/to/dicom/')
+        write_to_csv(['path/to/image1.png', 'path/to/image2.png'], \
+            'path/to/dicom/')
     """
     if len(png_files) == 0:
         logging.warning("No PNG files found for writing to CSV")
@@ -239,10 +247,54 @@ def write_to_csv(
     logging.info(f"CSV file saved: {csv_file_path}")
 
 
-def parse_arguments():
+def add_metadata_to_files(dicom_files):
+    """Add metadata to DICOM files."""
+    for file in dicom_files:
+        DicomTextReader(file, True)
+        logging.info(f"Added metadata to {file}")
+
+
+def delete_backup_files(dicom_files):
+    """Delete backup files."""
+    logging.info("Deleting backup files")
+    for file in dicom_files:
+        backup_file = file + ".bak"
+        os.remove(backup_file)
+        logging.info(f"Deleted {backup_file}")
+    logging.info("Deleted all backup files")
+
+
+def process_files(files, output):
+    """Process each file and convert if valid."""
+    all_converted_files = []
+    invalid_files = []
+    for file_path in files:
+        if os.path.isfile(file_path):
+            try:
+                converted_file = dicom_to_png(
+                    file_path, f"{output}/png" if output else None
+                )
+                all_converted_files.append(converted_file)
+                logging.info(f"Converted {file_path} to PNG")
+            except Exception as e:
+                logging.error(f"Error converting file {file_path}: {e}")
+                print(f"Error converting file {file_path}: {e}")
+        else:
+            invalid_files.append(file_path)
+    return all_converted_files, invalid_files
+
+
+def create_csv(all_converted_files, files, output):
+    """Create a CSV file with metadata of converted files."""
+    write_to_csv(all_converted_files, os.path.dirname(files[0]), True, output)
+    logging.info("CSV file created with metadata of converted files")
+
+
+def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Convert DICOM files to PNG and optionally write metadata to CSV."
+        description="Convert DICOM files to PNG and optionally write metadata \
+            to CSV."
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
@@ -266,44 +318,55 @@ def parse_arguments():
         action="store_true",
         help="Flag to write metadata to a CSV file.",
     )
+    parser.add_argument(
+        "--add-metadata",
+        action="store_true",
+        help="Flag to extract additional metadata from DICOM files.",
+    )
+    parser.add_argument(
+        "--delete-backup",
+        action="store_true",
+        help="Flag to delete backup files.",
+    )
     return parser.parse_args()
 
 
-def handle_directory_conversion(directory, output, csv_flag):
+def handle_directory_conversion(
+    directory, output, csv_flag, add_metadata, delete_backup
+):
     """Handle conversion of DICOM files in a directory."""
-    if os.path.isdir(directory):
-        converted_files = batch_convert_dicom_to_png(directory, output)
-        if csv_flag:
-            write_to_csv(converted_files, directory, False, output)
-        logging.info(f"Converted all files in directory {directory}")
-    else:
+    if not os.path.isdir(directory):
         logging.error("Invalid directory path")
         print("Invalid directory path")
+        return
+
+    converted_files, dicom_files = batch_convert_dicom_to_png(directory,
+                                                              output)
+    if csv_flag:
+        write_to_csv(converted_files, directory, False, output)
+    logging.info(f"Converted all files in directory {directory}")
+
+    if add_metadata:
+        add_metadata_to_files(dicom_files)
+
+    if delete_backup:
+        delete_backup_files(dicom_files)
 
 
-def handle_file_conversion(files, output, csv_flag):
+def handle_file_conversion(
+    files, output, csv_flag, add_metadata, delete_backup
+):
     """Handle conversion of individual DICOM files."""
-    all_converted_files = []
-    invalid_files = []
-    for file_path in files:
-        if os.path.isfile(file_path):
-            try:
-                converted_file = dicom_to_png(
-                    file_path, f"{output}/png" if output else None
-                )
-                all_converted_files.append(converted_file)
-                logging.info(f"Converted {file_path} to PNG")
-            except Exception as e:
-                logging.error(f"Error converting file {file_path}: {e}")
-                print(f"Error converting file {file_path}: {e}")
-        else:
-            invalid_files.append(file_path)
+    all_converted_files, invalid_files = process_files(files, output)
 
     if csv_flag and all_converted_files:
-        write_to_csv(
-            all_converted_files, os.path.dirname(files[0]), True, output
-        )
-        logging.info("CSV file created with metadata of converted files")
+        create_csv(all_converted_files, files, output)
+
+    if add_metadata:
+        add_metadata_to_files(files)
+
+    if delete_backup:
+        delete_backup_files(files)
 
     if invalid_files:
         logging.warning(f"Invalid file paths: {', '.join(invalid_files)}")
@@ -311,19 +374,36 @@ def handle_file_conversion(files, output, csv_flag):
 
 
 def main():
-    """Main function to handle command-line arguments and execute the script."""
+    """
+    Main function to handle command-line arguments and execute the script.
+    """
     parser = argparse.ArgumentParser(
-        description="Convert DICOM files to PNG and optionally write metadata to CSV."
+        description="Convert DICOM files to PNG and optionally write metadata \
+            to CSV."
     )
     args = parse_arguments()
 
     if args.directory:
-        handle_directory_conversion(args.directory, args.output, args.csv)
+        handle_directory_conversion(
+            args.directory,
+            args.output,
+            args.csv,
+            args.add_metadata,
+            args.delete_backup,
+        )
     elif args.file:
-        handle_file_conversion(args.file, args.output, args.csv)
+        handle_file_conversion(
+            args.file,
+            args.output,
+            args.csv,
+            args.add_metadata,
+            args.delete_backup,
+        )
     else:
         print(
-            "Usage: python main.py [-d <dicom_file_dir>] [-f <dicom_file_path> ...] -o <output_file_dir> [--csv]"
+            "Usage: python main.py [-d <dicom_file_dir>] [-f \
+                <dicom_file_path> ...] -o <output_file_dir> [--csv] \
+                    [--add-metadata] [--delete-backup]"
         )
         parser.print_help()
 

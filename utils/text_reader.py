@@ -1,14 +1,16 @@
 import json
+import logging
 import os
+import subprocess
 from datetime import date, datetime, time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import pydicom
 from pydicom.dataset import Dataset
 
 
 class DicomTextReader:
-    def __init__(self, filepath: str):
+    def __init__(self, filepath: str, modfiy: bool = False):
         """
         Initialize DicomTextReader with a DICOM file path
 
@@ -17,6 +19,8 @@ class DicomTextReader:
         """
         self.filepath = filepath
         self.dataset = pydicom.dcmread(filepath)
+        if modfiy:
+            self.get_study_info(modfiy=True)
 
     def _convert_value(self, value: Any) -> Any:
         """
@@ -62,7 +66,8 @@ class DicomTextReader:
                     data_dict[tag_name] = {
                         "value": value,
                         "VR": elem.VR,  # Value Representation
-                        "tag": f"({elem.tag.group:04x},{elem.tag.element:04x})",
+                        "tag": f"({elem.tag.group:04x},\
+                            {elem.tag.element:04x})",
                     }
                 except Exception as e:
                     print(f"Error processing tag {elem.tag}: {str(e)}")
@@ -95,7 +100,69 @@ class DicomTextReader:
 
         return {tag: self.dataset.get(tag, "") for tag in patient_tags}
 
-    def get_study_info(self) -> Dict[str, Any]:
+    def write_info(
+        self, laterality: Optional[str] = None, view: Optional[str] = None
+    ):
+        """
+        Write the information of the DICOM file
+        """
+        dcm = self.dataset
+        # Check if the DICOM file has the necessary tags
+        # View position
+        try:
+            view_str = dcm.ViewPosition
+            if view_str == "":
+                view_str = view
+        except AttributeError:
+            view_str = dcm.ViewPosition
+        # Laterality
+        try:
+            side_str = dcm.ImageLaterality
+        except AttributeError:
+            side_str = laterality
+        series_str = dcm.SOPClassUID
+        # Call `dcmodify` to write the information to the DICOM file
+        # First check if dcmodify is installed
+        try:
+            result = subprocess.run(
+                ["dcmodify", "--version"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            if result.returncode != 0:
+                raise OSError(
+                    """dcmodify is not installed. Please install it first.
+                        You can install it by running:
+                        apt-get install dcmtk
+                        or download it from:
+                        https://dicom.offis.de/en/dcmtk/dcmtk-tools/
+                        or on Windows with Chocolatey: `choco install dcmtk`
+                    """
+                )
+        except FileNotFoundError:
+            raise OSError(
+                """dcmodify is not installed. Please install it first.
+                    You can install it by running:
+                    apt-get install dcmtk
+                    or download it from:
+                    https://dicom.offis.de/en/dcmtk/dcmtk-tools/
+                    or on Windows with Chocolatey: `choco install dcmtk`
+                """
+            )
+        # Ex: dcmodify -i "(0020,0062)=L" -i "(0008,103e)=Mammogram" file.dcm
+        command = f'dcmodify -i "(0020,0062)={side_str}" -i "(0008,103e)=\
+            {series_str}" {self.filepath}'
+        process = subprocess.Popen(
+            command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        stdout, stderr = process.communicate()
+        if process.returncode != 0:
+            print(f"Error executing command: {command}")
+            print(f"Error message: {stdout.decode('utf-8')}")
+            logging.error(f"Error executing command: {command}")
+            logging.error(f"Error message: {stderr.decode('utf-8')}")
+
+    def get_study_info(self, modfiy: bool = False) -> Dict[str, Any]:
         """
         Get study-specific information including laterality and view position
 
@@ -130,9 +197,12 @@ class DicomTextReader:
             elif "L " in acquisition_desc:
                 response["Laterality"] = "L"
 
+        if modfiy:
+            self.write_info(response["Laterality"], response["ViewPosition"])
+
         return response
 
-    def save_to_json(self, output_path: str = None) -> str:
+    def save_to_json(self, output_path: Optional[str] = None) -> str:
         """
         Save DICOM metadata to JSON file
 
@@ -173,12 +243,16 @@ class DicomTextReader:
         print("\nImage Information:")
         print(f"Modality: {getattr(self.dataset, 'Modality', 'N/A')}")
         print(
-            f"Image Size: {getattr(self.dataset, 'Rows', 'N/A')}x{getattr(self.dataset, 'Columns', 'N/A')}"
+            f"Image Size: {getattr(self.dataset, 'Rows', 'N/A')}x{getattr(
+                self.dataset, 'Columns', 'N/A')}"
         )
         print(
             f"Bits Allocated: {getattr(self.dataset, 'BitsAllocated', 'N/A')}"
         )
-        print(f"Number of frames: {getattr(self.dataset, 'NumberOfFrames', 1)}")
+        print(
+            f"Number of frames: {getattr(self.dataset,
+                                         'NumberOfFrames', 1)}"
+        )
 
 
 def main():
