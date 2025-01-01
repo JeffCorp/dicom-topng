@@ -259,8 +259,11 @@ def delete_backup_files(dicom_files):
     logging.info("Deleting backup files")
     for file in dicom_files:
         backup_file = file + ".bak"
-        os.remove(backup_file)
-        logging.info(f"Deleted {backup_file}")
+        try:
+            os.remove(backup_file)
+            logging.info(f"Deleted {backup_file}")
+        except FileNotFoundError:
+            logging.warning(f"Backup file not found: {backup_file}")
     logging.info("Deleted all backup files")
 
 

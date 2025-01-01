@@ -114,7 +114,7 @@ class DicomTextReader:
             if view_str == "":
                 view_str = view
         except AttributeError:
-            view_str = dcm.ViewPosition
+            view_str = view
         # Laterality
         try:
             side_str = dcm.ImageLaterality
@@ -150,8 +150,22 @@ class DicomTextReader:
                 """
             )
         # Ex: dcmodify -i "(0020,0062)=L" -i "(0008,103e)=Mammogram" file.dcm
-        command = f'dcmodify -i "(0020,0062)={side_str}" -i "(0008,103e)=\
-            {series_str}" {self.filepath}'
+        program_path = "dcmodify"
+        flag = "-i"
+        laterality_tag = "(0020,0062)"
+        series_tag = "(0008,103e)"
+        view_tag = "(0018,5101)"
+        commands = [
+            program_path,
+            flag,
+            f"{laterality_tag}={side_str}",
+            flag,
+            f"{series_tag}={series_str}",
+            flag,
+            f"{view_tag}={view_str}",
+            self.filepath,
+        ]
+        command = " ".join(commands)
         process = subprocess.Popen(
             command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
